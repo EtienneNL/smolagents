@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+ARG NAT_EXTRAS=most
+RUN pip install --no-cache-dir "nvidia-nat[${NAT_EXTRAS}]"
+
+COPY config.yml /app/config.yml
+
+ENV NAT_CONFIG_FILE=/app/config.yml
+ENV NAT_HOST=0.0.0.0
+ENV NAT_PORT=8000
+
+CMD ["/bin/sh", "-lc", "nat serve --config_file \"$NAT_CONFIG_FILE\" --host \"$NAT_HOST\" --port \"${PORT:-$NAT_PORT}\""]
