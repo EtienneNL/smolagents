@@ -36,11 +36,25 @@ If your UI folder uses a different name, pass UI_SOURCE_DIR at build time.
 - NAT_BACKEND_URL (default: http://127.0.0.1:8000)
 - NEXT_INTERNAL_URL (default: http://127.0.0.1:3099)
 - PORT (default: 3000)
+- DATABRICKS_HOST (workspace host for LiteLLM provider)
+- DATABRICKS_TOKEN (Databricks PAT for LiteLLM provider)
 
 ## app.yaml
 The provided app.yaml includes only environment variables. Databricks Apps
 schemas vary by workspace and release channel, so add any required fields
 such as name, command/entrypoint, and ports in your environment.
+
+## LiteLLM Databricks provider (config.yml snippet)
+Use the env vars from app.yaml inside your NAT workflow config:
+
+```yaml
+llms:
+  dbx_llm:
+    _type: litellm
+    model_name: "databricks/<your-serving-endpoint>"
+    api_key: ${DATABRICKS_TOKEN}
+    base_url: ${DATABRICKS_HOST}
+```
 
 ## Notes
 - Do not start NAT inside a Python web app or any existing event loop.

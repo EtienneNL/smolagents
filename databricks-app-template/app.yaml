@@ -8,3 +8,7 @@ env:
   NAT_BACKEND_URL: http://127.0.0.1:8000
   NEXT_INTERNAL_URL: http://127.0.0.1:3099
   PORT: "3000"
+  # LiteLLM (Databricks provider) credentials for NAT config.yml
+  # Use Databricks Secrets or environment injection for real values.
+  DATABRICKS_HOST: https://<your-workspace>.cloud.databricks.com
+  DATABRICKS_TOKEN: <set-via-secrets>
