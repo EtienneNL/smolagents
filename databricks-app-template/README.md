@@ -1,24 +1,22 @@
 # Databricks Apps - NeMo Agent Toolkit UI + Backend (single app)
 
 This template runs the NeMo Agent Toolkit backend (NAT) and the UI in a
-single Databricks App. It highlights the "Runner.run() cannot be called
-from a running event loop" issue and shows the safe startup method that
-avoids it.
+single Databricks App using repo-run mode (no Dockerfile build). It
+highlights the "Runner.run() cannot be called from a running event loop"
+issue and shows the safe startup method that avoids it.
 
 ## What this template provides
-- Dockerfile that builds the UI and installs NAT (container build mode).
 - start.sh that launches NAT and the UI proxy/Next server together.
-- Guidance for repo-run mode (no Dockerfile build).
+- Repo-run guidance (no Dockerfile build).
 
 ## Assumptions
-- You will provide a NAT config file (path depends on build mode).
-- The UI source lives in a folder in the build context.
+- You will provide a NAT config file at `./config.yml` (repo root).
+- The UI source lives in a folder in the repo.
 
 ## Expected layout (recommended)
 Place these files in the root of your Databricks App repo:
 
   .
-  ├── Dockerfile
   ├── app.yaml
   ├── start.sh
   ├── config.yml
@@ -26,12 +24,8 @@ Place these files in the root of your Databricks App repo:
 
 If your UI folder uses a different name, pass UI_SOURCE_DIR at build time.
 
-## Build args (Dockerfile mode)
-- UI_SOURCE_DIR (default: NeMo-Agent-Toolkit-UI)
-- NAT_EXTRAS (default: most)
-
 ## Runtime env vars (common)
-- NAT_CONFIG_FILE (container: /app/config.yml, repo-run: ./config.yml)
+- NAT_CONFIG_FILE (default: ./config.yml)
 - NAT_HOST (default: 0.0.0.0)
 - NAT_PORT (internal NAT port, default: 8000 or 8001)
 - NAT_BACKEND_URL (UI proxy -> NAT, default: http://127.0.0.1:8000)
@@ -41,9 +35,10 @@ If your UI folder uses a different name, pass UI_SOURCE_DIR at build time.
 - DATABRICKS_API_KEY (Databricks PAT)
 
 ## app.yaml
-The provided app.yaml includes only environment variables. Databricks Apps
-schemas vary by workspace and release channel, so add any required fields
-such as name, command/entrypoint, and ports in your environment.
+The provided app.yaml includes environment variables and a `start.sh`
+command. Databricks Apps schemas vary by workspace and release channel,
+so add any required fields such as name, command/entrypoint, and ports
+in your environment.
 
 ## LiteLLM Databricks provider (config.yml snippet)
 Use the env vars from app.yaml inside your NAT workflow config:
@@ -75,7 +70,7 @@ export NAT_FRONT_END_WORKER=nat.front_ends.fastapi.fastapi_front_end_plugin_work
 uvicorn nat.front_ends.fastapi.main:get_app --factory --host 0.0.0.0 --port 8000
 ```
 
-## Combined app startup (repo-run, no Dockerfile build)
+## Combined app startup (repo-run)
 Use this pattern in `start.sh` to run NAT + UI safely:
 
 ```bash
