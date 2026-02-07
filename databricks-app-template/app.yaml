@@ -1,0 +1,10 @@
+# Template app.yaml for Databricks Apps
+# Adjust required top-level fields (name, command, ports, etc.) per your workspace.
+
+env:
+  NAT_CONFIG_FILE: /app/config.yml
+  NAT_HOST: 0.0.0.0
+  NAT_PORT: "8000"
+  NAT_BACKEND_URL: http://127.0.0.1:8000
+  NEXT_INTERNAL_URL: http://127.0.0.1:3099
+  PORT: "3000"

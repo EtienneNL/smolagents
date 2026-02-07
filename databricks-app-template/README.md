@@ -18,6 +18,7 @@ Place these files in the root of your Databricks App repo:
 
   .
   ├── Dockerfile
+  ├── app.yaml
   ├── start.sh
   ├── config.yml
   └── NeMo-Agent-Toolkit-UI/
@@ -35,6 +36,11 @@ If your UI folder uses a different name, pass UI_SOURCE_DIR at build time.
 - NAT_BACKEND_URL (default: http://127.0.0.1:8000)
 - NEXT_INTERNAL_URL (default: http://127.0.0.1:3099)
 - PORT (default: 3000)
+
+## app.yaml
+The provided app.yaml includes only environment variables. Databricks Apps
+schemas vary by workspace and release channel, so add any required fields
+such as name, command/entrypoint, and ports in your environment.
 
 ## Notes
 - Do not start NAT inside a Python web app or any existing event loop.
