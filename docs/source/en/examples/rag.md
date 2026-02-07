@@ -146,6 +146,48 @@ retriever_tool = RetrieverTool(docs_processed)
 > [!TIP]
 > We're using BM25, a lexical retrieval method, for simplicity and speed. For production systems, you might want to use semantic search with embeddings for better retrieval quality. Check the [MTEB Leaderboard](https://huggingface.co/spaces/mteb/leaderboard) for high-quality embedding models.
 
+### Optional: Hybrid search with Databricks Vector Search (similarity + filtering)
+
+If your retriever is backed by Databricks Vector Search, you can combine semantic similarity with keyword matching and metadata filters by setting `query_type` to `"hybrid"` and passing `filters` in the retriever `search_kwargs`.
+
+```python
+from databricks.vector_search.client import VectorSearchClient
+from langchain_community.vectorstores import DatabricksVectorSearch
+
+vsc = VectorSearchClient()
+index = vsc.get_index(endpoint_name="...", index_name="catalog.schema.index")
+
+vectorstore = DatabricksVectorSearch(
+    index=index,
+    text_column="content",
+    embedding=embedding,
+)
+
+retriever = vectorstore.as_retriever(
+    search_kwargs={
+        "query_type": "hybrid",
+        "filters": "doc_type = 'spec' AND product = 'lakehouse'",
+        "num_results": 8,
+    }
+)
+
+docs = retriever.invoke("How do I enable table constraints?")
+```
+
+> [!NOTE]
+> Hybrid search requires an index created with a text column for keyword scoring. Filter syntax uses your metadata columns (SQL-like expressions).
+
+If you prefer to bypass LangChain and query the index directly, the same knobs are available:
+
+```python
+results = index.similarity_search(
+    query_text="How do I enable table constraints?",
+    query_type="hybrid",
+    filters="doc_type = 'spec' AND product = 'lakehouse'",
+    num_results=8,
+)
+```
+
 ### Step 4: Create an Advanced Retrieval Agent
 
 Now we'll create an agent that can use our retriever tool to answer questions:
