@@ -70,6 +70,47 @@ export NAT_FRONT_END_WORKER=nat.front_ends.fastapi.fastapi_front_end_plugin_work
 uvicorn nat.front_ends.fastapi.main:get_app --factory --host 0.0.0.0 --port 8000
 ```
 
+## MLflow feedback telemetry (local to Databricks)
+This repo includes a lightweight MLflow telemetry + feedback plugin under
+`nat_mlflow_feedback/`. It:
+
+- Creates an MLflow run per workflow request
+- Sets `observability_trace_id` to the MLflow `run_id`
+- Exposes `/feedback` to log 👍/👎 to the run
+
+### Enable the plugin
+1) Install the plugin in `start.sh` (already handled if the folder exists):
+```bash
+pip install -e ./nat_mlflow_feedback
+```
+
+2) Set the front-end worker (repo-run requires this env var):
+```bash
+export NAT_FRONT_END_WORKER=nat_mlflow_feedback.fastapi_plugin_worker.MlflowFastAPIPluginWorker
+```
+
+3) Add telemetry config to `config.yml`:
+```yaml
+general:
+  telemetry:
+    tracing:
+      mlflow:
+        _type: mlflow
+        experiment_name: ${MLFLOW_EXPERIMENT_NAME}
+        tracking_uri: ${MLFLOW_TRACKING_URI:-}
+```
+
+4) Set environment variables in `app.yaml`:
+```yaml
+- name: NAT_FRONT_END_WORKER
+  value: nat_mlflow_feedback.fastapi_plugin_worker.MlflowFastAPIPluginWorker
+- name: MLFLOW_EXPERIMENT_NAME
+  value: nat-feedback
+```
+
+> The UI thumbs-up/down buttons call `/feedback` automatically once
+> `observability_trace_id` is present.
+
 ## Combined app startup (repo-run)
 Use this pattern in `start.sh` to run NAT + UI safely:
 
