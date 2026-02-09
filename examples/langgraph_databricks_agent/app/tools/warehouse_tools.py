@@ -13,7 +13,7 @@ from ..warehouse import UC_CATALOG, UC_SCHEMA, get_data_from_warehouse
 
 FULL_TABLE_NAME = f"{UC_CATALOG}.{UC_SCHEMA}.b1_nutrient_name_matching"
 ALIAS_SPLIT_PATTERN = re.compile(r"[;,|]+")
-COLUMN_MEANING_TABLE = f"{UC_CATALOG}.{UC_SCHEMA}.b1_table2_column_meanin"
+COLUMN_MEANING_TABLE = f"{UC_CATALOG}.{UC_SCHEMA}.b1_table2_column_meaning"
 
 
 def _normalize(text: str) -> str:
@@ -159,28 +159,50 @@ def clear_warehouse_tool_caches() -> None:
     _load_column_meaning_rows.cache_clear()
 
 
-def _parse_match_index(response_text: str, max_index: int) -> int | None:
+def _parse_match_indices(
+    response_text: str, max_index: int, top_k: int
+) -> list[int]:
+    def add_index(indices: list[int], value: int) -> None:
+        if value < 0 or value > max_index:
+            return
+        if value not in indices:
+            indices.append(value)
+
+    indices: list[int] = []
     try:
         payload = json.loads(response_text)
-        index = int(payload.get("match_index", -1))
-        if 0 <= index <= max_index:
-            return index
-        return None
+        if isinstance(payload, dict):
+            raw = payload.get("match_indices", payload.get("match_index", []))
+        else:
+            raw = payload
+        if isinstance(raw, list):
+            for item in raw:
+                try:
+                    add_index(indices, int(item))
+                except (TypeError, ValueError):
+                    continue
+        else:
+            try:
+                add_index(indices, int(raw))
+            except (TypeError, ValueError):
+                pass
     except (json.JSONDecodeError, TypeError, ValueError):
-        match = re.search(r"(-?\d+)", response_text)
-        if not match:
-            return None
-        index = int(match.group(1))
-        if 0 <= index <= max_index:
-            return index
-        return None
+        for match in re.findall(r"-?\d+", response_text):
+            try:
+                add_index(indices, int(match))
+            except ValueError:
+                continue
+
+    if not indices:
+        return []
+    return indices[:top_k]
 
 
-def _select_best_column_match(
-    query: str, candidates: list[dict]
-) -> dict | None:
-    if not candidates:
-        return None
+def _select_best_column_matches(
+    query: str, candidates: list[dict], top_k: int
+) -> list[dict]:
+    if not candidates or top_k <= 0:
+        return []
     llm = _get_similarity_llm()
     candidate_lines = []
     for index, candidate in enumerate(candidates):
@@ -195,24 +217,30 @@ def _select_best_column_match(
             f"User request: {query}",
             "Candidates:",
             *candidate_lines,
-            "Return JSON only: {\"match_index\": <0-based index or -1>}",
+            (
+                "Return JSON only: "
+                "{\"match_indices\": [<0-based indices best-to-worst>]}"
+            ),
         ]
     )
     messages = [
         SystemMessage(
             content=(
-                "Select the single best semantic match based on column meaning. "
-                "If none are relevant, return -1."
+                "Select the best semantic matches based on column meaning. "
+                "Return at most the requested count. If none are relevant, "
+                "return an empty list."
             )
         ),
         HumanMessage(content=prompt),
     ]
     response = llm.invoke(messages)
     response_text = response.content if hasattr(response, "content") else str(response)
-    match_index = _parse_match_index(response_text, len(candidates) - 1)
-    if match_index is None:
-        return None
-    return candidates[match_index]
+    match_indices = _parse_match_indices(
+        response_text, len(candidates) - 1, top_k
+    )
+    if not match_indices:
+        return []
+    return [candidates[index] for index in match_indices]
 
 
 @tool
@@ -284,23 +312,27 @@ def match_nutrient_names(
 @tool
 def match_column_names(
     query: list[str] | str,
+    top_k: int = 5,
 ) -> list[dict]:
     """Match user-described column meanings to column names using LLM similarity.
 
     Args:
         query: One or more column-meaning mentions.
+        top_k: Max number of matches to return per query.
 
     Returns:
         A list of results for each query, each with:
         {
           "query": <raw_query>,
           "normalized_query": <normalized_query>,
-          "match": {
-            "original_column_name": <column_name>,
-            "column_meaning": <meaning>,
-            "original_table_name": <table_name>,
-            "casual_table_name": <casual_name>
-          } | null
+          "matches": [
+            {
+              "original_column_name": <column_name>,
+              "column_meaning": <meaning>,
+              "original_table_name": <table_name>,
+              "casual_table_name": <casual_name>
+            }
+          ]
         }
     """
     if isinstance(query, str):
@@ -321,27 +353,28 @@ def match_column_names(
         limited_candidates = _limit_candidates_for_llm(
             query_norm, candidates
         )
-        best_match = _select_best_column_match(
-            query_entry["raw"], limited_candidates
+        best_matches = _select_best_column_matches(
+            query_entry["raw"], limited_candidates, top_k
         )
+        match_payload = []
+        for match in best_matches:
+            match_payload.append(
+                {
+                    "original_column_name": match[
+                        "original_column_name"
+                    ],
+                    "column_meaning": match["column_meaning"],
+                    "original_table_name": match[
+                        "original_table_name"
+                    ],
+                    "casual_table_name": match["casual_table_name"],
+                }
+            )
         results.append(
             {
                 "query": query_entry["raw"],
                 "normalized_query": query_norm,
-                "match": (
-                    {
-                        "original_column_name": best_match[
-                            "original_column_name"
-                        ],
-                        "column_meaning": best_match["column_meaning"],
-                        "original_table_name": best_match[
-                            "original_table_name"
-                        ],
-                        "casual_table_name": best_match["casual_table_name"],
-                    }
-                    if best_match
-                    else None
-                ),
+                "matches": match_payload,
             }
         )
     return results
