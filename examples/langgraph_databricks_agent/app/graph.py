@@ -4,9 +4,17 @@ from typing import Annotated, Sequence, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langchain_databricks import ChatDatabricks
-from langgraph.graph import END, StateGraph
+from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
+
+try:
+    from langgraph.graph import END
+except ImportError:  # Older LangGraph versions may not export END here.
+    try:
+        from langgraph.constants import END
+    except ImportError:
+        END = "__end__"
 
 from .config import load_config
 from .tools import TOOL_LIST
