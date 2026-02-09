@@ -12,6 +12,8 @@ from ..config import load_config
 from ..warehouse import UC_CATALOG, UC_SCHEMA, get_data_from_warehouse
 
 FULL_TABLE_NAME = f"{UC_CATALOG}.{UC_SCHEMA}.b1_nutrient_name_matching"
+IDENTIFIER_SIMPLE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+IDENTIFIER_SAFE_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 ALIAS_SPLIT_PATTERN = re.compile(r"[;,|]+")
 COLUMN_MEANING_TABLE = f"{UC_CATALOG}.{UC_SCHEMA}.b1_table2_column_meaning"
 
@@ -122,6 +124,96 @@ def _normalize_queries(queries: list[str]) -> list[dict]:
     return normalized
 
 
+def _escape_sql_literal(value: str) -> str:
+    return value.replace("'", "''")
+
+
+def _dedupe_preserve(items: list[str]) -> list[str]:
+    seen = set()
+    deduped = []
+    for item in items:
+        key = item.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _split_values(raw_values: str) -> list[str]:
+    parts = re.split(r"[;,]+", raw_values)
+    if len(parts) == 1:
+        parts = re.split(r"\s+and\s+", raw_values, flags=re.IGNORECASE)
+    cleaned = []
+    for part in parts:
+        trimmed = part.strip()
+        if trimmed:
+            cleaned.append(trimmed)
+    return cleaned
+
+
+def _safe_identifier(name: str) -> str:
+    if IDENTIFIER_SIMPLE_PATTERN.match(name):
+        return name
+    if IDENTIFIER_SAFE_PATTERN.match(name) and "`" not in name:
+        return f"`{name}`"
+    raise ValueError(f"Unsafe identifier: {name!r}")
+
+
+def _qualify_table_name(table_name: str) -> str:
+    if "." in table_name:
+        parts = table_name.split(".")
+        if len(parts) not in {2, 3}:
+            raise ValueError(f"Unexpected table name format: {table_name!r}")
+        safe_parts = [_safe_identifier(part) for part in parts]
+        return ".".join(safe_parts)
+    return f"{_safe_identifier(UC_CATALOG)}.{_safe_identifier(UC_SCHEMA)}.{_safe_identifier(table_name)}"
+
+
+def _extract_nutrient_values(
+    nutrient_input: list | str, preferred_key: str
+) -> list[str]:
+    values: list[str] = []
+    if isinstance(nutrient_input, str):
+        values.extend(_split_values(nutrient_input))
+    else:
+        for item in nutrient_input:
+            if isinstance(item, str):
+                values.extend(_split_values(item))
+            elif isinstance(item, dict):
+                if "matches" in item:
+                    for match in item.get("matches", []):
+                        value = match.get(preferred_key)
+                        if value:
+                            values.append(str(value))
+                else:
+                    value = item.get(preferred_key)
+                    if value:
+                        values.append(str(value))
+    return _dedupe_preserve(values)
+
+
+def _extract_column_names(column_input: list | str) -> list[str]:
+    columns: list[str] = []
+    if isinstance(column_input, str):
+        columns.extend(_split_values(column_input))
+    else:
+        for item in column_input:
+            if isinstance(item, str):
+                columns.extend(_split_values(item))
+            elif isinstance(item, dict):
+                if "matches" in item:
+                    for match in item.get("matches", []):
+                        column_name = match.get("original_column_name")
+                        if column_name:
+                            columns.append(str(column_name))
+                else:
+                    column_name = item.get("original_column_name")
+                    if column_name:
+                        columns.append(str(column_name))
+    return _dedupe_preserve(columns)
+
+
 def _limit_candidates_for_llm(
     query_normalized: str,
     candidates: list[dict],
@@ -217,6 +309,7 @@ def _select_best_column_matches(
             f"User request: {query}",
             "Candidates:",
             *candidate_lines,
+            f"Return up to {top_k} best matches.",
             (
                 "Return JSON only: "
                 "{\"match_indices\": [<0-based indices best-to-worst>]}"
@@ -378,3 +471,76 @@ def match_column_names(
             }
         )
     return results
+
+
+@tool
+def query_nutrient_data(
+    nutrient_matches: list | str,
+    column_matches: list | str,
+    table_name: str = "SN_MAIVA_Comply_Check_Min_and_Max_As_In_Spec",
+    nutrient_column: str = "nutr_name",
+    nutrient_key: str | None = None,
+    limit: int = 200,
+) -> dict:
+    """Query a warehouse table using nutrient and column matches.
+
+    Args:
+        nutrient_matches: Output from match_nutrient_names or list of nutrient names.
+        column_matches: Output from match_column_names or list of column names.
+        table_name: Target table to query (unqualified or qualified).
+        nutrient_column: Column used for filtering nutrients.
+        nutrient_key: Key to extract from match_nutrient_names output.
+            Defaults to nutrient_column.
+        limit: Max rows to return.
+
+    Returns:
+        {
+          "table": <qualified_table_name>,
+          "nutrient_column": <nutrient_column>,
+          "columns": [<column names>],
+          "query": <sql>,
+          "rows": [<row values>]
+        }
+    """
+    resolved_nutrient_key = nutrient_key or nutrient_column
+    nutrient_values = _extract_nutrient_values(
+        nutrient_matches, resolved_nutrient_key
+    )
+    column_names = _extract_column_names(column_matches)
+
+    if not nutrient_values:
+        raise ValueError("No nutrients provided for query.")
+    if not column_names:
+        raise ValueError("No columns provided for query.")
+
+    nutrient_column_safe = _safe_identifier(nutrient_column)
+    qualified_table = _qualify_table_name(table_name)
+
+    safe_columns = [_safe_identifier(name) for name in column_names]
+    if nutrient_column_safe not in safe_columns:
+        safe_columns.insert(0, nutrient_column_safe)
+
+    escaped_values = [
+        f"'{_escape_sql_literal(value)}'" for value in nutrient_values
+    ]
+    in_clause = ", ".join(escaped_values)
+    limit_clause = ""
+    if limit is not None and limit > 0:
+        limit_clause = f" LIMIT {int(limit)}"
+
+    sql_statement = (
+        f"SELECT {', '.join(safe_columns)} "
+        f"FROM {qualified_table} "
+        f"WHERE {nutrient_column_safe} IN ({in_clause})"
+        f"{limit_clause}"
+    )
+
+    rows = get_data_from_warehouse(sql_statement)
+    row_values = [list(row) for row in rows]
+    return {
+        "table": qualified_table,
+        "nutrient_column": nutrient_column_safe,
+        "columns": safe_columns,
+        "query": sql_statement,
+        "rows": row_values,
+    }
