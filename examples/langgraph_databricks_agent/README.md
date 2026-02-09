@@ -22,6 +22,8 @@ node (`ToolNode`) and a Databricks-hosted model via LangChain's Databricks API.
    export DATABRICKS_MODEL_ENDPOINT="<your-model-serving-endpoint-name>"
    export DATABRICKS_SERVER_HOSTNAME="<your-workspace-hostname>"
    export DATABRICKS_HTTP_PATH="<your-sql-warehouse-http-path>"
+   export DATABRICKS_UC_CATALOG="uc-specializednutrition-rnd-prd-001"
+   export DATABRICKS_UC_SCHEMA="sn_quality_control_dev"
    ```
 
 3. Run the example:

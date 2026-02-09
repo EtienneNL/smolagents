@@ -4,6 +4,15 @@ import os
 
 from databricks import sql
 
+UC_CATALOG = os.environ.get(
+    "DATABRICKS_UC_CATALOG",
+    "uc-specializednutrition-rnd-prd-001",
+)
+UC_SCHEMA = os.environ.get(
+    "DATABRICKS_UC_SCHEMA",
+    "sn_quality_control_dev",
+)
+
 
 def get_warehouse_connection():
     return sql.connect(

@@ -6,12 +6,9 @@ from typing import Iterable
 
 from langchain_core.tools import tool
 
-from ..warehouse import get_data_from_warehouse
+from ..warehouse import UC_CATALOG, UC_SCHEMA, get_data_from_warehouse
 
-FULL_TABLE_NAME = (
-    "uc-specializednutrition-rnd-prd-001."
-    "sn_quality_control_dev.b1_nutrient_name_matching"
-)
+FULL_TABLE_NAME = f"{UC_CATALOG}.{UC_SCHEMA}.b1_nutrient_name_matching"
 
 
 def _normalize(text: str) -> str:
