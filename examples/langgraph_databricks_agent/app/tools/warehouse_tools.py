@@ -11,21 +11,86 @@ from langchain_databricks import ChatDatabricks
 from ..config import load_config
 from ..warehouse import UC_CATALOG, UC_SCHEMA, get_data_from_warehouse
 
+# =========================
+# Constants and configuration
+# =========================
 FULL_TABLE_NAME = f"{UC_CATALOG}.{UC_SCHEMA}.b1_nutrient_name_matching"
-IDENTIFIER_SIMPLE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-IDENTIFIER_SAFE_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
-ALIAS_SPLIT_PATTERN = re.compile(r"[;,|]+")
 COLUMN_MEANING_TABLE = f"{UC_CATALOG}.{UC_SCHEMA}.b1_table2_column_meaning"
 SPEC_PREFIX = "2"
 CHANGE_PREFIX = "5"
 SPEC_ZERO_PADDING = "0000000"
 
+IDENTIFIER_SIMPLE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+IDENTIFIER_SAFE_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+ALIAS_SPLIT_PATTERN = re.compile(r"[;,|]+")
 
+# =========================
+# Shared text helpers
+# =========================
 def _normalize(text: str) -> str:
     cleaned = re.sub(r"[^a-z0-9]+", " ", text.casefold())
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
+def _split_queries(raw_query: str) -> list[str]:
+    if not raw_query.strip():
+        return []
+    parts = re.split(r"[;,]+", raw_query)
+    if len(parts) == 1:
+        parts = re.split(r"\s+and\s+", raw_query, flags=re.IGNORECASE)
+    cleaned = []
+    for part in parts:
+        trimmed = part.strip()
+        if trimmed:
+            cleaned.append(trimmed)
+    return cleaned
+
+
+def _normalize_queries(queries: list[str]) -> list[dict]:
+    normalized = []
+    for query in queries:
+        normalized_query = _normalize(query)
+        if normalized_query:
+            normalized.append(
+                {
+                    "raw": query,
+                    "normalized": normalized_query,
+                }
+            )
+    return normalized
+
+
+def _split_values(raw_values: str) -> list[str]:
+    parts = re.split(r"[;,]+", raw_values)
+    if len(parts) == 1:
+        parts = re.split(r"\s+and\s+", raw_values, flags=re.IGNORECASE)
+    cleaned = []
+    for part in parts:
+        trimmed = part.strip()
+        if trimmed:
+            cleaned.append(trimmed)
+    return cleaned
+
+
+def _dedupe_preserve(items: list[str]) -> list[str]:
+    seen = set()
+    deduped = []
+    for item in items:
+        key = item.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _escape_sql_literal(value: str) -> str:
+    return value.replace("'", "''")
+
+
+# =========================
+# Helpers for match_nutrient_names
+# =========================
 def _split_aliases(raw_aliases: str) -> list[str]:
     parts = ALIAS_SPLIT_PATTERN.split(raw_aliases)
     cleaned = []
@@ -71,6 +136,78 @@ def _load_nutrient_alias_rows() -> list[dict]:
     return candidates
 
 
+# =========================
+# Tool: match_nutrient_names
+# =========================
+@tool
+def match_nutrient_names(
+    query: list[str] | str,
+    top_k: int | None = None,
+) -> list[dict]:
+    """Match nutrient aliases against the UC matching table.
+
+    Args:
+        query: One or more nutrient mentions (e.g., ["prot", "fat"]).
+        top_k: Optional max number of matches to return.
+
+    Returns:
+        A list of results for each query, each with:
+        {
+          "query": <raw_query>,
+          "normalized_query": <normalized_query>,
+          "matches": [
+            {
+              "nutr_name": <matched_name>,
+              "nutr_code": <matched_code>,
+              "nutr_alias": <matched_alias>
+            }
+          ]
+        }
+    """
+    if isinstance(query, str):
+        query_list = _split_queries(query)
+    else:
+        query_list = []
+        for item in query:
+            query_list.extend(_split_queries(str(item)))
+
+    normalized_queries = _normalize_queries(query_list)
+    if not normalized_queries:
+        return []
+
+    candidates = _load_nutrient_alias_rows()
+    results = []
+    for query_entry in normalized_queries:
+        query_norm = query_entry["normalized"]
+        matches = []
+        for candidate in candidates:
+            for alias_entry in candidate["aliases"]:
+                if query_norm == alias_entry["normalized"]:
+                    matches.append(
+                        {
+                            "nutr_name": candidate["nutr_name"],
+                            "nutr_code": candidate["nutr_code"],
+                            "nutr_alias": alias_entry["alias"],
+                        }
+                    )
+                    break
+        if top_k is None:
+            limited_matches = matches
+        else:
+            limited_matches = matches[: max(top_k, 0)]
+        results.append(
+            {
+                "query": query_entry["raw"],
+                "normalized_query": query_norm,
+                "matches": limited_matches,
+            }
+        )
+    return results
+
+
+# =========================
+# Helpers for match_column_names
+# =========================
 @lru_cache(maxsize=1)
 def _load_column_meaning_rows() -> list[dict]:
     rows = get_data_from_warehouse(
@@ -97,206 +234,6 @@ def _load_column_meaning_rows() -> list[dict]:
             }
         )
     return candidates
-
-
-def _split_queries(raw_query: str) -> list[str]:
-    if not raw_query.strip():
-        return []
-    parts = re.split(r"[;,]+", raw_query)
-    if len(parts) == 1:
-        parts = re.split(r"\s+and\s+", raw_query, flags=re.IGNORECASE)
-    cleaned = []
-    for part in parts:
-        trimmed = part.strip()
-        if trimmed:
-            cleaned.append(trimmed)
-    return cleaned
-
-
-def _normalize_queries(queries: list[str]) -> list[dict]:
-    normalized = []
-    for query in queries:
-        normalized_query = _normalize(query)
-        if normalized_query:
-            normalized.append(
-                {
-                    "raw": query,
-                    "normalized": normalized_query,
-                }
-            )
-    return normalized
-
-
-def _escape_sql_literal(value: str) -> str:
-    return value.replace("'", "''")
-
-
-def _dedupe_preserve(items: list[str]) -> list[str]:
-    seen = set()
-    deduped = []
-    for item in items:
-        key = item.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(item)
-    return deduped
-
-
-def _split_values(raw_values: str) -> list[str]:
-    parts = re.split(r"[;,]+", raw_values)
-    if len(parts) == 1:
-        parts = re.split(r"\s+and\s+", raw_values, flags=re.IGNORECASE)
-    cleaned = []
-    for part in parts:
-        trimmed = part.strip()
-        if trimmed:
-            cleaned.append(trimmed)
-    return cleaned
-
-
-def _normalize_spec_change(value: str, prefix: str) -> list[str]:
-    digits = "".join(re.findall(r"\d", str(value)))
-    if not digits:
-        return []
-
-    candidates = []
-    full_pattern = rf"^{re.escape(prefix)}0{{7}}\d{{4}}$"
-    if re.match(full_pattern, digits):
-        candidates.append(digits)
-
-    if len(digits) >= 4:
-        last_four = digits[-4:]
-        candidates.append(f"{prefix}{SPEC_ZERO_PADDING}{last_four}")
-
-    return _dedupe_preserve(candidates)
-
-
-def _safe_identifier(name: str) -> str:
-    if IDENTIFIER_SIMPLE_PATTERN.match(name):
-        return name
-    if IDENTIFIER_SAFE_PATTERN.match(name) and "`" not in name:
-        return f"`{name}`"
-    raise ValueError(f"Unsafe identifier: {name!r}")
-
-
-def _qualify_table_name(table_name: str) -> str:
-    if "." in table_name:
-        parts = table_name.split(".")
-        if len(parts) not in {2, 3}:
-            raise ValueError(f"Unexpected table name format: {table_name!r}")
-        safe_parts = [_safe_identifier(part) for part in parts]
-        return ".".join(safe_parts)
-    return f"{_safe_identifier(UC_CATALOG)}.{_safe_identifier(UC_SCHEMA)}.{_safe_identifier(table_name)}"
-
-
-def _extract_nutrient_values(
-    nutrient_input: list | str, preferred_key: str
-) -> list[str]:
-    values: list[str] = []
-    if isinstance(nutrient_input, str):
-        values.extend(_split_values(nutrient_input))
-    else:
-        for item in nutrient_input:
-            if isinstance(item, str):
-                values.extend(_split_values(item))
-            elif isinstance(item, dict):
-                if "matches" in item:
-                    for match in item.get("matches", []):
-                        value = match.get(preferred_key)
-                        if value:
-                            values.append(str(value))
-                else:
-                    value = item.get(preferred_key)
-                    if value:
-                        values.append(str(value))
-    return _dedupe_preserve(values)
-
-
-def _extract_column_names(column_input: list | str) -> list[str]:
-    columns: list[str] = []
-    if isinstance(column_input, str):
-        columns.extend(_split_values(column_input))
-    else:
-        for item in column_input:
-            if isinstance(item, str):
-                columns.extend(_split_values(item))
-            elif isinstance(item, dict):
-                if "matches" in item:
-                    for match in item.get("matches", []):
-                        column_name = match.get("original_column_name")
-                        if column_name:
-                            columns.append(str(column_name))
-                else:
-                    column_name = item.get("original_column_name")
-                    if column_name:
-                        columns.append(str(column_name))
-    return _dedupe_preserve(columns)
-
-
-def _infer_unit_from_text(text: str) -> str | None:
-    normalized = text.casefold()
-    if (
-        "per 100 g" in normalized
-        or "per 100g" in normalized
-        or "per_100g" in normalized
-        or "per100g" in normalized
-        or "per 100 g" in normalized.replace("_", " ")
-    ):
-        return "per 100 g"
-    if (
-        "per 100 kj" in normalized
-        or "per 100kj" in normalized
-        or "per_100kj" in normalized
-        or "per100kj" in normalized
-        or "per 100 kj" in normalized.replace("_", " ")
-    ):
-        return "per 100 kJ"
-    if (
-        "percent" in normalized
-        or "percentage" in normalized
-        or "pct" in normalized
-        or "%" in normalized
-    ):
-        return "percent"
-    return None
-
-
-def _extract_column_units(column_input: list | str) -> dict[str, str | None]:
-    units: dict[str, str | None] = {}
-
-    def set_unit(column_name: str, meaning: str | None = None) -> None:
-        text = column_name
-        if meaning:
-            text = f"{column_name} {meaning}"
-        unit = _infer_unit_from_text(text)
-        units[column_name] = unit
-
-    if isinstance(column_input, str):
-        for name in _split_values(column_input):
-            set_unit(name)
-    else:
-        for item in column_input:
-            if isinstance(item, str):
-                for name in _split_values(item):
-                    set_unit(name)
-            elif isinstance(item, dict):
-                if "matches" in item:
-                    for match in item.get("matches", []):
-                        column_name = match.get("original_column_name")
-                        if column_name:
-                            set_unit(
-                                str(column_name),
-                                match.get("column_meaning"),
-                            )
-                else:
-                    column_name = item.get("original_column_name")
-                    if column_name:
-                        set_unit(
-                            str(column_name),
-                            item.get("column_meaning"),
-                        )
-    return units
 
 
 def _limit_candidates_for_llm(
@@ -329,11 +266,6 @@ def _limit_candidates_for_llm(
 def _get_similarity_llm() -> ChatDatabricks:
     config = load_config()
     return ChatDatabricks(endpoint=config.model_endpoint, temperature=0)
-
-
-def clear_warehouse_tool_caches() -> None:
-    _load_nutrient_alias_rows.cache_clear()
-    _load_column_meaning_rows.cache_clear()
 
 
 def _parse_match_indices(
@@ -421,72 +353,15 @@ def _select_best_column_matches(
     return [candidates[index] for index in match_indices]
 
 
-@tool
-def match_nutrient_names(
-    query: list[str] | str,
-    top_k: int | None = None,
-) -> list[dict]:
-    """Match nutrient aliases against the UC matching table.
-
-    Args:
-        query: One or more nutrient mentions (e.g., ["prot", "fat"]).
-        top_k: Optional max number of matches to return.
-
-    Returns:
-        A list of results for each query, each with:
-        {
-          "query": <raw_query>,
-          "normalized_query": <normalized_query>,
-          "matches": [
-            {
-              "nutr_name": <matched_name>,
-              "nutr_code": <matched_code>,
-              "nutr_alias": <matched_alias>
-            }
-          ]
-        }
-    """
-    if isinstance(query, str):
-        query_list = _split_queries(query)
-    else:
-        query_list = []
-        for item in query:
-            query_list.extend(_split_queries(str(item)))
-
-    normalized_queries = _normalize_queries(query_list)
-    if not normalized_queries:
-        return []
-
-    candidates = _load_nutrient_alias_rows()
-    results = []
-    for query_entry in normalized_queries:
-        query_norm = query_entry["normalized"]
-        matches = []
-        for candidate in candidates:
-            for alias_entry in candidate["aliases"]:
-                if query_norm == alias_entry["normalized"]:
-                    matches.append(
-                        {
-                            "nutr_name": candidate["nutr_name"],
-                            "nutr_code": candidate["nutr_code"],
-                            "nutr_alias": alias_entry["alias"],
-                        }
-                    )
-                    break
-        if top_k is None:
-            limited_matches = matches
-        else:
-            limited_matches = matches[: max(top_k, 0)]
-        results.append(
-            {
-                "query": query_entry["raw"],
-                "normalized_query": query_norm,
-                "matches": limited_matches,
-            }
-        )
-    return results
+# Cache management for nutrient/column lookups
+def clear_warehouse_tool_caches() -> None:
+    _load_nutrient_alias_rows.cache_clear()
+    _load_column_meaning_rows.cache_clear()
 
 
+# =========================
+# Tool: match_column_names
+# =========================
 @tool
 def match_column_names(
     query: list[str] | str,
@@ -558,6 +433,162 @@ def match_column_names(
     return results
 
 
+# =========================
+# Helpers for query_nutrient_data
+# =========================
+def _normalize_spec_change(value: str, prefix: str) -> list[str]:
+    digits = "".join(re.findall(r"\d", str(value)))
+    if not digits:
+        return []
+
+    candidates = []
+    full_pattern = rf"^{re.escape(prefix)}0{{7}}\d{{4}}$"
+    if re.match(full_pattern, digits):
+        candidates.append(digits)
+
+    if len(digits) >= 4:
+        last_four = digits[-4:]
+        candidates.append(f"{prefix}{SPEC_ZERO_PADDING}{last_four}")
+
+    return _dedupe_preserve(candidates)
+
+
+def _safe_identifier(name: str) -> str:
+    if IDENTIFIER_SIMPLE_PATTERN.match(name):
+        return name
+    if IDENTIFIER_SAFE_PATTERN.match(name) and "`" not in name:
+        return f"`{name}`"
+    raise ValueError(f"Unsafe identifier: {name!r}")
+
+
+def _qualify_table_name(table_name: str) -> str:
+    if "." in table_name:
+        parts = table_name.split(".")
+        if len(parts) not in {2, 3}:
+            raise ValueError(f"Unexpected table name format: {table_name!r}")
+        safe_parts = [_safe_identifier(part) for part in parts]
+        return ".".join(safe_parts)
+    return (
+        f"{_safe_identifier(UC_CATALOG)}."
+        f"{_safe_identifier(UC_SCHEMA)}."
+        f"{_safe_identifier(table_name)}"
+    )
+
+
+def _extract_nutrient_values(
+    nutrient_input: list | str, preferred_key: str
+) -> list[str]:
+    values: list[str] = []
+    if isinstance(nutrient_input, str):
+        values.extend(_split_values(nutrient_input))
+    else:
+        for item in nutrient_input:
+            if isinstance(item, str):
+                values.extend(_split_values(item))
+            elif isinstance(item, dict):
+                if "matches" in item:
+                    for match in item.get("matches", []):
+                        value = match.get(preferred_key)
+                        if value:
+                            values.append(str(value))
+                else:
+                    value = item.get(preferred_key)
+                    if value:
+                        values.append(str(value))
+    return _dedupe_preserve(values)
+
+
+def _extract_column_names(column_input: list | str) -> list[str]:
+    columns: list[str] = []
+    if isinstance(column_input, str):
+        columns.extend(_split_values(column_input))
+    else:
+        for item in column_input:
+            if isinstance(item, str):
+                columns.extend(_split_values(item))
+            elif isinstance(item, dict):
+                if "matches" in item:
+                    for match in item.get("matches", []):
+                        column_name = match.get("original_column_name")
+                        if column_name:
+                            columns.append(str(column_name))
+                else:
+                    column_name = item.get("original_column_name")
+                    if column_name:
+                        columns.append(str(column_name))
+    return _dedupe_preserve(columns)
+
+
+# Optional unit inference for column meanings (unused by default).
+def _infer_unit_from_text(text: str) -> str | None:
+    normalized = text.casefold()
+    if (
+        "per 100 g" in normalized
+        or "per 100g" in normalized
+        or "per_100g" in normalized
+        or "per100g" in normalized
+        or "per 100 g" in normalized.replace("_", " ")
+    ):
+        return "per 100 g"
+    if (
+        "per 100 kj" in normalized
+        or "per 100kj" in normalized
+        or "per_100kj" in normalized
+        or "per100kj" in normalized
+        or "per 100 kj" in normalized.replace("_", " ")
+    ):
+        return "per 100 kJ"
+    if (
+        "percent" in normalized
+        or "percentage" in normalized
+        or "pct" in normalized
+        or "%" in normalized
+    ):
+        return "percent"
+    return None
+
+
+# Optional unit inference for a batch of column names (unused by default).
+def _extract_column_units(column_input: list | str) -> dict[str, str | None]:
+    units: dict[str, str | None] = {}
+
+    def set_unit(column_name: str, meaning: str | None = None) -> None:
+        text = column_name
+        if meaning:
+            text = f"{column_name} {meaning}"
+        unit = _infer_unit_from_text(text)
+        units[column_name] = unit
+
+    if isinstance(column_input, str):
+        for name in _split_values(column_input):
+            set_unit(name)
+    else:
+        for item in column_input:
+            if isinstance(item, str):
+                for name in _split_values(item):
+                    set_unit(name)
+            elif isinstance(item, dict):
+                if "matches" in item:
+                    for match in item.get("matches", []):
+                        column_name = match.get("original_column_name")
+                        if column_name:
+                            set_unit(
+                                str(column_name),
+                                match.get("column_meaning"),
+                            )
+                else:
+                    column_name = item.get("original_column_name")
+                    if column_name:
+                        set_unit(
+                            str(column_name),
+                            item.get("column_meaning"),
+                        )
+    return units
+
+
+# =========================
+# Tool: query_nutrient_data
+# =========================
 @tool
 def query_nutrient_data(
     nutrient_matches: list | str,
