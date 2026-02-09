@@ -234,6 +234,71 @@ def _extract_column_names(column_input: list | str) -> list[str]:
     return _dedupe_preserve(columns)
 
 
+def _infer_unit_from_text(text: str) -> str | None:
+    normalized = text.casefold()
+    if (
+        "per 100 g" in normalized
+        or "per 100g" in normalized
+        or "per_100g" in normalized
+        or "per100g" in normalized
+        or "per 100 g" in normalized.replace("_", " ")
+    ):
+        return "per 100 g"
+    if (
+        "per 100 kj" in normalized
+        or "per 100kj" in normalized
+        or "per_100kj" in normalized
+        or "per100kj" in normalized
+        or "per 100 kj" in normalized.replace("_", " ")
+    ):
+        return "per 100 kJ"
+    if (
+        "percent" in normalized
+        or "percentage" in normalized
+        or "pct" in normalized
+        or "%" in normalized
+    ):
+        return "percent"
+    return None
+
+
+def _extract_column_units(column_input: list | str) -> dict[str, str | None]:
+    units: dict[str, str | None] = {}
+
+    def set_unit(column_name: str, meaning: str | None = None) -> None:
+        text = column_name
+        if meaning:
+            text = f"{column_name} {meaning}"
+        unit = _infer_unit_from_text(text)
+        units[column_name] = unit
+
+    if isinstance(column_input, str):
+        for name in _split_values(column_input):
+            set_unit(name)
+    else:
+        for item in column_input:
+            if isinstance(item, str):
+                for name in _split_values(item):
+                    set_unit(name)
+            elif isinstance(item, dict):
+                if "matches" in item:
+                    for match in item.get("matches", []):
+                        column_name = match.get("original_column_name")
+                        if column_name:
+                            set_unit(
+                                str(column_name),
+                                match.get("column_meaning"),
+                            )
+                else:
+                    column_name = item.get("original_column_name")
+                    if column_name:
+                        set_unit(
+                            str(column_name),
+                            item.get("column_meaning"),
+                        )
+    return units
+
+
 def _limit_candidates_for_llm(
     query_normalized: str,
     candidates: list[dict],
@@ -502,6 +567,7 @@ def query_nutrient_data(
     table_name: str = "SN_MAIVA_Comply_Check_Min_and_Max_As_In_Spec",
     nutrient_column: str = "nutr_name",
     nutrient_key: str | None = None,
+    unit_column: str = "unit",
     limit: int = 200,
 ) -> dict:
     """Query a warehouse table using nutrient and column matches.
@@ -515,6 +581,7 @@ def query_nutrient_data(
         nutrient_column: Column used for filtering nutrients.
         nutrient_key: Key to extract from match_nutrient_names output.
             Defaults to nutrient_column.
+        unit_column: Column containing the unit for the values.
         limit: Max rows to return.
 
     Returns:
@@ -538,11 +605,14 @@ def query_nutrient_data(
         raise ValueError("No columns provided for query.")
 
     nutrient_column_safe = _safe_identifier(nutrient_column)
+    unit_column_safe = _safe_identifier(unit_column)
     qualified_table = _qualify_table_name(table_name)
 
     safe_columns = [_safe_identifier(name) for name in column_names]
     if nutrient_column_safe not in safe_columns:
         safe_columns.insert(0, nutrient_column_safe)
+    if unit_column_safe not in safe_columns:
+        safe_columns.insert(1, unit_column_safe)
 
     escaped_values = [
         f"'{_escape_sql_literal(value)}'" for value in nutrient_values
@@ -580,6 +650,7 @@ def query_nutrient_data(
     return {
         "table": qualified_table,
         "nutrient_column": nutrient_column_safe,
+        "unit_column": unit_column_safe,
         "columns": safe_columns,
         "query": sql_statement,
         "rows": row_values,
