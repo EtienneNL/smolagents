@@ -477,6 +477,8 @@ def match_column_names(
 def query_nutrient_data(
     nutrient_matches: list | str,
     column_matches: list | str,
+    spec_num: str,
+    change_num: str,
     table_name: str = "SN_MAIVA_Comply_Check_Min_and_Max_As_In_Spec",
     nutrient_column: str = "nutr_name",
     nutrient_key: str | None = None,
@@ -487,6 +489,8 @@ def query_nutrient_data(
     Args:
         nutrient_matches: Output from match_nutrient_names or list of nutrient names.
         column_matches: Output from match_column_names or list of column names.
+        spec_num: Specification number to filter.
+        change_num: Change number to filter.
         table_name: Target table to query (unqualified or qualified).
         nutrient_column: Column used for filtering nutrients.
         nutrient_key: Key to extract from match_nutrient_names output.
@@ -524,6 +528,8 @@ def query_nutrient_data(
         f"'{_escape_sql_literal(value)}'" for value in nutrient_values
     ]
     in_clause = ", ".join(escaped_values)
+    spec_value = f"'{_escape_sql_literal(spec_num)}'"
+    change_value = f"'{_escape_sql_literal(change_num)}'"
     limit_clause = ""
     if limit is not None and limit > 0:
         limit_clause = f" LIMIT {int(limit)}"
@@ -531,7 +537,9 @@ def query_nutrient_data(
     sql_statement = (
         f"SELECT {', '.join(safe_columns)} "
         f"FROM {qualified_table} "
-        f"WHERE {nutrient_column_safe} IN ({in_clause})"
+        f"WHERE {nutrient_column_safe} IN ({in_clause}) "
+        f"AND specification = {spec_value} "
+        f"AND change_number = {change_value}"
         f"{limit_clause}"
     )
 
