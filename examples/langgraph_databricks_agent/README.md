@@ -20,6 +20,8 @@ node (`ToolNode`) and a Databricks-hosted model via LangChain's Databricks API.
    export DATABRICKS_HOST="https://<your-workspace-host>"
    export DATABRICKS_TOKEN="<your-personal-access-token>"
    export DATABRICKS_MODEL_ENDPOINT="<your-model-serving-endpoint-name>"
+   export DATABRICKS_SERVER_HOSTNAME="<your-workspace-hostname>"
+   export DATABRICKS_HTTP_PATH="<your-sql-warehouse-http-path>"
    ```
 
 3. Run the example:
