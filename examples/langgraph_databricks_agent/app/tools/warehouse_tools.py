@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from difflib import SequenceMatcher
 import re
 
 from langchain_core.tools import tool
@@ -14,10 +13,6 @@ ALIAS_SPLIT_PATTERN = re.compile(r"[;,|]+")
 def _normalize(text: str) -> str:
     cleaned = re.sub(r"[^a-z0-9]+", " ", text.casefold())
     return re.sub(r"\s+", " ", cleaned).strip()
-
-
-def _score_normalized(query: str, candidate: str) -> float:
-    return SequenceMatcher(None, query, candidate).ratio()
 
 
 def _split_aliases(raw_aliases: str) -> list[str]:
@@ -95,15 +90,13 @@ def _normalize_queries(queries: list[str]) -> list[dict]:
 @tool
 def match_nutrient_names(
     query: list[str] | str,
-    top_k: int = 5,
-    min_score: float = 0.6,
+    top_k: int | None = None,
 ) -> list[dict]:
-    """Fuzzy match nutrient aliases against the UC matching table.
+    """Match nutrient aliases against the UC matching table.
 
     Args:
         query: One or more nutrient mentions (e.g., ["prot", "fat"]).
-        top_k: Max number of matches to return.
-        min_score: Minimum similarity score (0-1) to include.
+        top_k: Optional max number of matches to return.
 
     Returns:
         A list of results for each query, each with:
@@ -114,8 +107,7 @@ def match_nutrient_names(
             {
               "nutr_name": <matched_name>,
               "nutr_code": <matched_code>,
-              "nutr_alias": <matched_alias>,
-              "score": <0-1>
+              "nutr_alias": <matched_alias>
             }
           ]
         }
@@ -137,29 +129,25 @@ def match_nutrient_names(
         query_norm = query_entry["normalized"]
         matches = []
         for candidate in candidates:
-            best_score = 0.0
-            best_alias = ""
             for alias_entry in candidate["aliases"]:
-                score = _score_normalized(query_norm, alias_entry["normalized"])
-                if score > best_score:
-                    best_score = score
-                    best_alias = alias_entry["alias"]
-            if best_score >= min_score:
-                matches.append(
-                    {
-                        "nutr_name": candidate["nutr_name"],
-                        "nutr_code": candidate["nutr_code"],
-                        "nutr_alias": best_alias,
-                        "score": best_score,
-                    }
-                )
-
-        matches.sort(key=lambda item: item["score"], reverse=True)
+                if query_norm == alias_entry["normalized"]:
+                    matches.append(
+                        {
+                            "nutr_name": candidate["nutr_name"],
+                            "nutr_code": candidate["nutr_code"],
+                            "nutr_alias": alias_entry["alias"],
+                        }
+                    )
+                    break
+        if top_k is None:
+            limited_matches = matches
+        else:
+            limited_matches = matches[: max(top_k, 0)]
         results.append(
             {
                 "query": query_entry["raw"],
                 "normalized_query": query_norm,
-                "matches": matches[: max(top_k, 0)],
+                "matches": limited_matches,
             }
         )
     return results
