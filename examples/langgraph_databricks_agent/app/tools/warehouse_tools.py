@@ -16,6 +16,9 @@ IDENTIFIER_SIMPLE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 IDENTIFIER_SAFE_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 ALIAS_SPLIT_PATTERN = re.compile(r"[;,|]+")
 COLUMN_MEANING_TABLE = f"{UC_CATALOG}.{UC_SCHEMA}.b1_table2_column_meaning"
+SPEC_PREFIX = "2"
+CHANGE_PREFIX = "5"
+SPEC_ZERO_PADDING = "0000000"
 
 
 def _normalize(text: str) -> str:
@@ -150,6 +153,23 @@ def _split_values(raw_values: str) -> list[str]:
         if trimmed:
             cleaned.append(trimmed)
     return cleaned
+
+
+def _normalize_spec_change(value: str, prefix: str) -> list[str]:
+    digits = "".join(re.findall(r"\d", str(value)))
+    if not digits:
+        return []
+
+    candidates = []
+    full_pattern = rf"^{re.escape(prefix)}0{{7}}\d{{4}}$"
+    if re.match(full_pattern, digits):
+        candidates.append(digits)
+
+    if len(digits) >= 4:
+        last_four = digits[-4:]
+        candidates.append(f"{prefix}{SPEC_ZERO_PADDING}{last_four}")
+
+    return _dedupe_preserve(candidates)
 
 
 def _safe_identifier(name: str) -> str:
@@ -489,8 +509,8 @@ def query_nutrient_data(
     Args:
         nutrient_matches: Output from match_nutrient_names or list of nutrient names.
         column_matches: Output from match_column_names or list of column names.
-        spec_num: Specification number to filter.
-        change_num: Change number to filter.
+        spec_num: Specification number to filter (full or shorthand).
+        change_num: Change number to filter (full or shorthand).
         table_name: Target table to query (unqualified or qualified).
         nutrient_column: Column used for filtering nutrients.
         nutrient_key: Key to extract from match_nutrient_names output.
@@ -528,8 +548,20 @@ def query_nutrient_data(
         f"'{_escape_sql_literal(value)}'" for value in nutrient_values
     ]
     in_clause = ", ".join(escaped_values)
-    spec_value = f"'{_escape_sql_literal(spec_num)}'"
-    change_value = f"'{_escape_sql_literal(change_num)}'"
+    spec_values = _normalize_spec_change(spec_num, SPEC_PREFIX)
+    change_values = _normalize_spec_change(change_num, CHANGE_PREFIX)
+
+    if not spec_values:
+        raise ValueError("Invalid spec_num; expected at least 4 digits.")
+    if not change_values:
+        raise ValueError("Invalid change_num; expected at least 4 digits.")
+
+    spec_clause = ", ".join(
+        f"'{_escape_sql_literal(value)}'" for value in spec_values
+    )
+    change_clause = ", ".join(
+        f"'{_escape_sql_literal(value)}'" for value in change_values
+    )
     limit_clause = ""
     if limit is not None and limit > 0:
         limit_clause = f" LIMIT {int(limit)}"
@@ -538,8 +570,8 @@ def query_nutrient_data(
         f"SELECT {', '.join(safe_columns)} "
         f"FROM {qualified_table} "
         f"WHERE {nutrient_column_safe} IN ({in_clause}) "
-        f"AND specification = {spec_value} "
-        f"AND change_number = {change_value}"
+        f"AND specification IN ({spec_clause}) "
+        f"AND change_number IN ({change_clause})"
         f"{limit_clause}"
     )
 
