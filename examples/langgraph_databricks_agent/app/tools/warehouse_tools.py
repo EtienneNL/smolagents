@@ -31,6 +31,7 @@ def _split_aliases(raw_aliases: str) -> list[str]:
     return cleaned
 
 
+@lru_cache(maxsize=1)
 def _load_nutrient_alias_rows() -> list[dict]:
     rows = get_data_from_warehouse(
         "SELECT nutr_name, nutr_code, nutr_alias "
@@ -65,6 +66,7 @@ def _load_nutrient_alias_rows() -> list[dict]:
     return candidates
 
 
+@lru_cache(maxsize=1)
 def _load_column_meaning_rows() -> list[dict]:
     rows = get_data_from_warehouse(
         "SELECT original_column_name, column_meaning, "
@@ -150,6 +152,11 @@ def _limit_candidates_for_llm(
 def _get_similarity_llm() -> ChatDatabricks:
     config = load_config()
     return ChatDatabricks(endpoint=config.model_endpoint, temperature=0)
+
+
+def clear_warehouse_tool_caches() -> None:
+    _load_nutrient_alias_rows.cache_clear()
+    _load_column_meaning_rows.cache_clear()
 
 
 def _parse_match_index(response_text: str, max_index: int) -> int | None:
