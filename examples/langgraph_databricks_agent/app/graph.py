@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Sequence, TypedDict
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_databricks import ChatDatabricks
 from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
@@ -24,6 +24,12 @@ class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
 
+SYSTEM_PROMPT = (
+    "You are a helpful assistant. Use tools when they are helpful to answer "
+    "the user's request."
+)
+
+
 def build_graph():
     config = load_config()
     llm = ChatDatabricks(endpoint=config.model_endpoint, temperature=0)
@@ -32,7 +38,10 @@ def build_graph():
     tool_node = ToolNode(TOOL_LIST)
 
     def call_model(state: AgentState):
-        response = llm_with_tools.invoke(state["messages"])
+        messages = list(state["messages"])
+        if not messages or not isinstance(messages[0], SystemMessage):
+            messages = [SystemMessage(content=SYSTEM_PROMPT), *messages]
+        response = llm_with_tools.invoke(messages)
         return {"messages": [response]}
 
     def route_from_agent(state: AgentState):
