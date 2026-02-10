@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from pydantic import Field
 
 from nat.builder.builder import Builder
+from nat.builder.framework_enum import LLMFrameworkEnum
+from nat.builder.function_info import FunctionInfo
 from nat.cli.register_workflow import register_function
 from nat.data_models.function import FunctionBaseConfig
 
@@ -41,13 +45,18 @@ class LangGraphAgentConfig(FunctionBaseConfig, name="langgraph_agent"):
     )
 
 
-@register_function(config_type=LangGraphAgentConfig)
+@register_function(
+    config_type=LangGraphAgentConfig,
+    framework_wrappers=[LLMFrameworkEnum.LANGCHAIN],
+)
 async def langgraph_agent_function(
     config: LangGraphAgentConfig, builder: Builder
 ):
     graph = build_graph(system_prompt=config.system_prompt or SYSTEM_PROMPT)
 
-    def _invoke(query: str | None = None, messages: list[dict] | None = None) -> str:
+    async def _invoke(
+        query: str | None = None, messages: list[dict] | None = None
+    ) -> str:
         if messages:
             state_messages = _coerce_messages(messages)
         elif query:
@@ -55,14 +64,25 @@ async def langgraph_agent_function(
         else:
             raise ValueError("Provide either 'query' or 'messages' to langgraph_agent.")
 
-        result = graph.invoke({"messages": state_messages})
+        if hasattr(graph, "ainvoke"):
+            result = await graph.ainvoke({"messages": state_messages})
+        else:
+            result = await asyncio.to_thread(
+                graph.invoke, {"messages": state_messages}
+            )
         result_messages = result.get("messages") if isinstance(result, dict) else None
         if not result_messages:
             return ""
         last_message = result_messages[-1]
         return last_message.content if hasattr(last_message, "content") else str(last_message)
 
-    yield _invoke
+    yield FunctionInfo.from_fn(
+        _invoke,
+        description=(
+            "Invoke the LangGraph workflow using a Databricks-backed LLM "
+            "and data tools."
+        ),
+    )
 
 
 class MatchNutrientNamesConfig(FunctionBaseConfig, name="match_nutrient_names"):
