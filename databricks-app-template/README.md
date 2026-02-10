@@ -159,6 +159,65 @@ general:
 > The UI thumbs-up/down buttons call `/feedback` automatically once
 > `observability_trace_id` is present.
 
+## Document upload → chunk → vector search (PDF/DOCX/TXT)
+This repo includes a lightweight document ingestion plugin under
+`nat_doc_ingest/`. It adds:
+
+- `POST /documents/import` (accepts PDF, DOCX, TXT)
+- `search_uploaded_docs` tool (vector search query)
+
+### Enable the ingestion endpoint
+1) Install the plugin in `start.sh` (already handled if the folder exists):
+```bash
+pip install -e ./nat_doc_ingest
+```
+
+2) Set the front-end worker (use this if you want ingestion + MLflow feedback):
+```bash
+export NAT_FRONT_END_WORKER=nat_doc_ingest.fastapi_plugin_worker.DocumentIngestFastAPIPluginWorker
+```
+
+3) Add vector search config to `app.yaml`:
+```yaml
+- name: VECTOR_SEARCH_ENDPOINT
+  value: <vector-search-endpoint-name>
+- name: VECTOR_SEARCH_INDEX
+  value: <catalog.schema.index_name>
+- name: VECTOR_SEARCH_EMBEDDINGS_ENDPOINT
+  value: <embeddings-endpoint-name>
+```
+
+### Add the tool to config.yml
+```yaml
+functions:
+  search_uploaded_docs:
+    _type: search_uploaded_docs
+
+workflow:
+  _type: react_agent
+  llm_name: dbx_llm
+  tool_names:
+    - search_uploaded_docs
+```
+
+### UI change (repurpose "Import data" button)
+Update the UI to POST a file to `/api/documents/import` instead of reading JSON:
+
+```ts
+const form = new FormData();
+form.append('file', file);
+await fetch('/api/documents/import', { method: 'POST', body: form });
+```
+
+Also add `/documents/import` to the proxy allowlist in the UI constants:
+
+```js
+const EXTENDED_ROUTES = {
+  ...,
+  DOCUMENTS_IMPORT: '/documents/import',
+};
+```
+
 ## Combined app startup (repo-run)
 Use this pattern in `start.sh` to run NAT + UI safely:
 

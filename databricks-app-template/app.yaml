@@ -21,3 +21,14 @@ env:
   # Optional fallbacks used by the LangGraph config loader
   DATABRICKS_API_BASE: https://<your-workspace>.cloud.databricks.com/serving-endpoints
   DATABRICKS_API_KEY: <set-via-secrets>
+  # Document ingestion (Vector Search)
+  VECTOR_SEARCH_ENDPOINT: <vector-search-endpoint-name>
+  VECTOR_SEARCH_INDEX: <catalog.schema.index_name>
+  VECTOR_SEARCH_EMBEDDINGS_ENDPOINT: <embeddings-endpoint-name>
+  VECTOR_SEARCH_PRIMARY_KEY: id
+  VECTOR_SEARCH_TEXT_COLUMN: content
+  VECTOR_SEARCH_EMBEDDING_COLUMN: embedding
+  VECTOR_SEARCH_CHUNK_SIZE: "1500"
+  VECTOR_SEARCH_CHUNK_OVERLAP: "200"
+  VECTOR_SEARCH_BATCH_SIZE: "64"
+  VECTOR_SEARCH_CREATE_INDEX: "false"

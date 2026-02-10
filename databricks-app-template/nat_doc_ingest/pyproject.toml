@@ -1,0 +1,25 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools>=64"]
+
+[project]
+name = "nat-doc-ingest"
+version = "0.1.0"
+dependencies = [
+  "databricks-sdk",
+  "databricks-vectorsearch",
+  "pypdf",
+  "python-docx",
+  "python-multipart",
+  "requests",
+]
+requires-python = ">=3.11"
+
+[project.entry-points.'nat.components']
+nat_doc_ingest = "nat_doc_ingest.register"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
