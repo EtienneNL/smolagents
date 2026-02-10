@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "legislation-langgraph-agent"
+version = "0.1.0"
+description = "LangGraph tool-only agent with Databricks hybrid retriever"
+requires-python = ">=3.10"
+dependencies = [
+  "langgraph",
+  "langchain-community",
+  "langchain-core",
+  "databricks-vectorsearch",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
