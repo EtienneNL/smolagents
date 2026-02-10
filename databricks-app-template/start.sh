@@ -16,6 +16,10 @@ if [ -d "./nat_mlflow_feedback" ]; then
   pip install -e ./nat_mlflow_feedback
 fi
 
+if [ -d "./langgraph_agent" ]; then
+  pip install -e ./langgraph_agent
+fi
+
 if [ -d "./CLIMATE_ASSISTANT" ]; then
   pip install -e ./CLIMATE_ASSISTANT
 fi

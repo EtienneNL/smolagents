@@ -52,6 +52,54 @@ llms:
     base_url: ${DATABRICKS_API_BASE}
 ```
 
+## LangGraph agent bridge (optional)
+If you want to reuse a LangGraph workflow inside your NeMo Agent Toolkit
+workflow, this repo includes a lightweight plugin under `langgraph_agent/`.
+It exposes:
+
+- `langgraph_agent` (invokes the compiled LangGraph workflow)
+- `match_nutrient_names`, `match_column_names`, `query_nutrient_data`
+
+`start.sh` installs the package automatically when the folder exists.
+
+### config.yml snippet
+```yaml
+functions:
+  langgraph_agent:
+    _type: langgraph_agent
+    # Optional override:
+    # system_prompt: "..."
+
+  match_nutrient_names:
+    _type: match_nutrient_names
+
+  match_column_names:
+    _type: match_column_names
+
+  query_nutrient_data:
+    _type: query_nutrient_data
+
+workflow:
+  _type: react_agent
+  llm_name: dbx_llm
+  tool_names:
+    - match_nutrient_names
+    - match_column_names
+    - query_nutrient_data
+    - langgraph_agent
+```
+
+### Required env vars
+The LangGraph tools reuse the same Databricks environment variables used by
+NAT, with a few extras for SQL access:
+
+- `DATABRICKS_HOST` (fallback: `DATABRICKS_API_BASE`)
+- `DATABRICKS_TOKEN` (fallback: `DATABRICKS_API_KEY`)
+- `DATABRICKS_MODEL_ENDPOINT` (fallback: `DATABRICKS_SERVING_ENDPOINT`)
+- `DATABRICKS_HTTP_PATH`
+- `DATABRICKS_SERVER_HOSTNAME`
+- `DATABRICKS_UC_CATALOG`, `DATABRICKS_UC_SCHEMA` (optional overrides)
+
 ## Runner.run() warning and the fix
 If you launch NAT using `nat serve` in Databricks repo-run mode, you may see:
 

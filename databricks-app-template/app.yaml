@@ -2,7 +2,7 @@
 # Adjust required top-level fields (name, command, ports, etc.) per your workspace.
 
 env:
-  NAT_CONFIG_FILE: /app/config.yml
+  NAT_CONFIG_FILE: ./config.yml
   NAT_HOST: 0.0.0.0
   NAT_PORT: "8000"
   NAT_BACKEND_URL: http://127.0.0.1:8000
@@ -12,3 +12,12 @@ env:
   # Use Databricks Secrets or environment injection for real values.
   DATABRICKS_HOST: https://<your-workspace>.cloud.databricks.com
   DATABRICKS_TOKEN: <set-via-secrets>
+  # LangGraph agent / Databricks SQL
+  DATABRICKS_MODEL_ENDPOINT: <serving-endpoint-name>
+  DATABRICKS_HTTP_PATH: /sql/1.0/warehouses/<warehouse-id>
+  DATABRICKS_SERVER_HOSTNAME: <adb-workspace-hostname>
+  DATABRICKS_UC_CATALOG: <uc-catalog-name>
+  DATABRICKS_UC_SCHEMA: <uc-schema-name>
+  # Optional fallbacks used by the LangGraph config loader
+  DATABRICKS_API_BASE: https://<your-workspace>.cloud.databricks.com/serving-endpoints
+  DATABRICKS_API_KEY: <set-via-secrets>
