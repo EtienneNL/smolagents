@@ -192,12 +192,15 @@ export NAT_FRONT_END_WORKER=nat_doc_ingest.fastapi_plugin_worker.DocumentIngestF
 functions:
   search_uploaded_docs:
     _type: search_uploaded_docs
+  search_uploaded_docs_with_citations:
+    _type: search_uploaded_docs_with_citations
 
 workflow:
   _type: react_agent
   llm_name: dbx_llm
   tool_names:
     - search_uploaded_docs
+    - search_uploaded_docs_with_citations
 ```
 
 ### UI change (repurpose "Import data" button)
@@ -216,6 +219,17 @@ const EXTENDED_ROUTES = {
   ...,
   DOCUMENTS_IMPORT: '/documents/import',
 };
+```
+
+### Accordion citations (Option B)
+Use the `search_uploaded_docs_with_citations` tool to get a preformatted
+accordion block you can append to the assistant response.
+
+Example response usage:
+```
+Answer: ...
+
+{{accordion_markdown}}
 ```
 
 ## Combined app startup (repo-run)

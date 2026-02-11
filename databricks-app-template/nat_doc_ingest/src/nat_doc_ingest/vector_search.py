@@ -130,18 +130,63 @@ def search_index(
     index = client.get_index(config.endpoint, config.index_name)
 
     if hasattr(index, "similarity_search"):
-        return index.similarity_search(
+        raw = index.similarity_search(
             query_text=query,
             columns=columns,
             num_results=top_k,
         )
+        return _normalize_search_results(raw, columns)
 
     embedding = _request_embeddings(config, [query])[0]
     if hasattr(index, "query"):
-        return index.query(
+        raw = index.query(
             query_vector=embedding,
             columns=columns,
             num_results=top_k,
         )
+        return _normalize_search_results(raw, columns)
 
     raise RuntimeError("Vector search index does not support query methods.")
+
+
+def _normalize_search_results(
+    raw: Any, fallback_columns: list[str]
+) -> list[dict[str, Any]]:
+    if isinstance(raw, list):
+        if not raw:
+            return []
+        if isinstance(raw[0], dict):
+            return raw
+        if isinstance(raw[0], (list, tuple)):
+            return _rows_to_dicts(raw, fallback_columns)
+        return []
+
+    if isinstance(raw, dict):
+        if "data" in raw and isinstance(raw["data"], list):
+            if raw["data"] and isinstance(raw["data"][0], dict):
+                return raw["data"]
+            if raw["data"] and isinstance(raw["data"][0], (list, tuple)):
+                columns = raw.get("columns") or raw.get("column_names") or fallback_columns
+                return _rows_to_dicts(raw["data"], columns)
+
+        if "result" in raw and isinstance(raw["result"], dict):
+            result = raw["result"]
+            data_array = result.get("data_array")
+            if data_array and isinstance(data_array, list):
+                columns = result.get("column_names") or fallback_columns
+                return _rows_to_dicts(data_array, columns)
+
+    return []
+
+
+def _rows_to_dicts(rows: list[list[Any]], columns: list[str]) -> list[dict[str, Any]]:
+    if not columns:
+        columns = [f"col_{idx}" for idx in range(len(rows[0]) if rows else 0)]
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        row_dict: dict[str, Any] = {}
+        for idx, value in enumerate(row):
+            key = columns[idx] if idx < len(columns) else f"col_{idx}"
+            row_dict[key] = value
+        normalized.append(row_dict)
+    return normalized
