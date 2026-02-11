@@ -192,6 +192,8 @@ export NAT_FRONT_END_WORKER=nat_doc_ingest.fastapi_plugin_worker.DocumentIngestF
 functions:
   search_uploaded_docs:
     _type: search_uploaded_docs
+  retrieve_uploaded_docs:
+    _type: retrieve_uploaded_docs
   search_uploaded_docs_with_citations:
     _type: search_uploaded_docs_with_citations
 
@@ -200,6 +202,7 @@ workflow:
   llm_name: dbx_llm
   tool_names:
     - search_uploaded_docs
+    - retrieve_uploaded_docs
     - search_uploaded_docs_with_citations
 ```
 
@@ -230,6 +233,28 @@ Example response usage:
 Answer: ...
 
 {{accordion_markdown}}
+```
+
+### Retriever output (Option B - structured)
+If you want raw retrieval fields (title, page index, chunk content), use:
+
+```yaml
+functions:
+  retrieve_uploaded_docs:
+    _type: retrieve_uploaded_docs
+```
+
+It returns:
+```
+[
+  {
+    "title": "<filename>",
+    "page_index": <page>,
+    "content": "<chunk text>",
+    "document_id": "<uuid>",
+    "chunk_index": <int>
+  }
+]
 ```
 
 ## Combined app startup (repo-run)
