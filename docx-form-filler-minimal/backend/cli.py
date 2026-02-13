@@ -10,8 +10,10 @@ from pathlib import Path
 
 try:
     from backend.docx_processor import analyze_docx_placeholders, fill_docx_template
+    from backend.llm_mapper import DEFAULT_LLM_MODEL, extract_scalar_values_with_llm
 except ModuleNotFoundError:
     from docx_processor import analyze_docx_placeholders, fill_docx_template
+    from llm_mapper import DEFAULT_LLM_MODEL, extract_scalar_values_with_llm
 
 
 def _parse_values(values_raw: str | None, values_file: str | None) -> dict:
@@ -71,11 +73,33 @@ def cmd_fill(args: argparse.Namespace) -> int:
             return 1
         excel_bytes = excel_path.read_bytes()
 
+    input_bytes = input_path.read_bytes()
+
+    if args.use_llm:
+        if not args.instructions:
+            print("Error: --instructions is required when --use-llm is set")
+            return 1
+        try:
+            summary = analyze_docx_placeholders(input_bytes)
+            llm_values = extract_scalar_values_with_llm(
+                instructions=args.instructions,
+                allowed_placeholders=summary.scalar_placeholders,
+                model=args.llm_model,
+                api_key=args.anthropic_api_key,
+            )
+        except Exception as exc:
+            print(f"Error extracting values with LLM: {exc}")
+            return 1
+
+        # Explicit --values / --values-file entries override LLM output.
+        values = {**llm_values, **values}
+        print(f"LLM extracted {len(llm_values)} values using model '{args.llm_model}'")
+
     output_path = Path(args.output) if args.output else input_path.with_name(f"{input_path.stem}_filled.docx")
 
     try:
         filled_bytes = fill_docx_template(
-            docx_bytes=input_path.read_bytes(),
+            docx_bytes=input_bytes,
             values=values,
             excel_bytes=excel_bytes,
         )
@@ -102,6 +126,24 @@ def build_parser() -> argparse.ArgumentParser:
     fill_parser.add_argument("--values", help="Inline JSON object with scalar placeholder values")
     fill_parser.add_argument("--values-file", help="Path to JSON file with scalar placeholder values")
     fill_parser.add_argument("--excel", help="Path to .xlsx/.xls file for table placeholders")
+    fill_parser.add_argument(
+        "--use-llm",
+        action="store_true",
+        help="Use LLM structured output to extract scalar placeholder values from instructions",
+    )
+    fill_parser.add_argument(
+        "--instructions",
+        help="Natural language instructions for LLM extraction (required with --use-llm)",
+    )
+    fill_parser.add_argument(
+        "--anthropic-api-key",
+        help="Anthropic API key for LLM extraction (or set ANTHROPIC_API_KEY)",
+    )
+    fill_parser.add_argument(
+        "--llm-model",
+        default=DEFAULT_LLM_MODEL,
+        help=f"Anthropic model for extraction (default: {DEFAULT_LLM_MODEL})",
+    )
     fill_parser.set_defaults(func=cmd_fill)
 
     return parser
